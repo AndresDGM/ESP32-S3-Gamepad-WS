@@ -1,5 +1,58 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define ANCHO_PANTALLA 128
+#define ALTO_PANTALLA 64
+#define RESET_PANTALLA -1
+
+#define screen_address 0x3C
+
+#define SDA_PIN 8
+#define SCL_PIN 9
+
+Adafruit_SSD1306 display(ANCHO_PANTALLA, ALTO_PANTALLA, &Wire, RESET_PANTALLA);
+
+uint8_t x = 64;
+uint8_t y = 32;
+uint8_t r = 2;
+bool buttonA = false;
+bool buttonB = false;
+bool DPadLeft = false;
+bool DPadRight = false;
+bool DPadDown = false;
+bool DPadUp = false;
+
+void imprimirPorPantalla(const String& mensaje, bool Ln = true, bool Clean = false,
+                        int textSize = 1){
+  if(Clean){
+    display.clearDisplay();
+    display.setCursor(0,0);
+  }
+
+  display.setTextSize(textSize);
+  display.setTextColor(SSD1306_WHITE);
+
+  if (Ln)
+  {
+    display.println(mensaje);
+  }else{
+    display.print(mensaje);
+  }
+  display.display();
+}
+
+void iniciarOled(){
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, screen_address)) {
+    Serial.println(F("Fallo al iniciar SSD1306"));
+    for (;;) delay(500);
+  }
+  imprimirPorPantalla("ESP32-S3 Iniciando...", true, true);
+}
 
 // Replace with your network credentials
 const char* ssid = "GUEVARA";
@@ -33,7 +86,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div id="axis"></div>
 
   <script>
-    var gateway = `wss://${window.location.hostname}/ws`;
+    var gateway = `ws://${window.location.hostname}/ws`;
     var websocket;
     
     window.addEventListener('load', onLoad);
@@ -174,12 +227,85 @@ const char index_html[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+void controlInputHandle(String button, String value){
+  if(button == "b-a" && value == "true"){
+    buttonA = true;
+  }else{
+    buttonA = false;
+  }
+
+  if(button == "b-b" && value == "true"){
+    buttonB = true;
+  }else{
+    buttonB = false;
+  }
+
+  if(button == "d-p-l" && value == "true"){
+    DPadLeft = true;
+  }else{
+    DPadLeft = false;
+  }
+
+  if(button == "d-p-r" && value == "true"){
+    DPadRight = true;
+  }else{
+    DPadRight = false;
+  }
+
+  if(button == "d-p-u" && value == "true"){
+    DPadUp = true;
+  }else{
+    DPadUp = false;
+  }
+
+  if(button == "d-p-d" && value == "true"){
+    DPadDown = true;
+  }else{
+    DPadDown = false;
+  }
+}
+
+void moveCircle(){
+  if(buttonA){
+    if(r < 10) r++;
+  }
+  
+  if(buttonB){
+    if(r > 0) r--;
+  }
+
+  if(DPadLeft){
+    if(x > 0) x--;
+  }
+  if(DPadRight){
+    if(x < 128 - 2*r) x++;
+  }
+  if(DPadUp){
+    if(y > 0) y--;
+  }
+  if(DPadDown){
+    if(y < 64 - 2*r) y++;
+  }
+  display.clearDisplay();
+  display.fillCircle(x, y, r, SSD1306_WHITE);
+  display.display();
+}
+
 // Handles incoming WebSocket string data transfers
-void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
+void handleWebSocketMessage(void *arg, uint8_t *message, size_t len) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
   if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-    Serial.write(data, len);
-    Serial.println();
+    String messageStr = String(message, len);
+    String data[2];
+    int index = 0;
+    for(int i = 0; i < messageStr.length(); i++){
+      if(messageStr[i] == ':'){ 
+        i++;
+        index++;
+      }
+      data[index] += messageStr[i];
+    }
+    controlInputHandle(data[0], data[1]);
   }
 }
 
@@ -209,15 +335,15 @@ void initWebSocket() {
 
 void setup() {
   Serial.begin(115200);
+  iniciarOled();
   // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    imprimirPorPantalla(".");
   }
-  Serial.println("");
-  Serial.print("Connected! IP Address: ");
-  Serial.println(WiFi.localIP());
+  imprimirPorPantalla("IP Address: ", false, true);
+  imprimirPorPantalla(WiFi.localIP().toString(), true, false);
 
   initWebSocket();
 
@@ -231,6 +357,6 @@ void setup() {
 }
 
 void loop() {
-  // Clean up disconnected clients periodically
   ws.cleanupClients();
+  moveCircle();
 }
